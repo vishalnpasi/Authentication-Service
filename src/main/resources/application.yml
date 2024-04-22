@@ -1,0 +1,13 @@
+#consul properties
+spring:
+  cloud:
+    consul:
+      discovery: 
+        instanceId: ${spring.application.name}
+      # Using Consul Connect Service Mesh
+#      scheme: http
+      host: localhost
+#      config:
+#        enabled: true
+      port: 8500
+

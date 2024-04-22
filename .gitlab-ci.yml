@@ -1,0 +1,220 @@
+stages:
+#  - scan
+  # - build
+  # - test
+  - analyze
+  # - release-image
+  - deploy
+  - logs
+
+variables:
+  SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+  GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+
+sonarcloud-check:
+  stage: analyze
+  image: gradle:8.4.0-jdk17-alpine
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - apk add --upgrade libcurl
+    - apk add --no-cache curl
+    - gradle clean build sonar -x compileTestJava -x test
+    - |
+      BUG_VULNERABILITY_RESULT=$(curl -u $SONAR_TOKEN: "https://sonarcloud.io/api/issues/search?projectKeys=albanero1_platform-authentication-service&resolved=false&types=BUG,VULNERABILITY&branch=$CI_COMMIT_REF_NAME" )
+         if echo "$BUG_VULNERABILITY_RESULT" | grep -q "\"total\":0"; then
+                   echo "No bugs or vulnerabilities found!"
+         else
+                   echo "Bugs or vulnerabilities detected!"
+                   exit 1
+         fi
+  rules:
+    - if: $CI_COMMIT_REF_NAME == 'dev' || $CI_COMMIT_REF_NAME == 'release' || $CI_COMMIT_REF_NAME == 'main' || $CI_PIPELINE_SOURCE == 'merge_request_event'
+  allow_failure: false
+
+
+.installPreRequisite_job: &installPreRequisite_job
+  before_script:
+    - apk add --no-cache openvpn openssh-client curl
+    - apk add --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/testing ccze
+
+
+deployment1-dev1:
+  stage: deploy
+  image: alpine:latest
+  variables:
+    IMAGE_TAG: $CI_REGISTRY_IMAGE/albanero-java-17-bi:1
+  <<: *installPreRequisite_job
+  script:
+    - >
+      curl -X POST -H 'Content-type: application/json' --data "{
+      \"text\":\"Repo: $CI_PROJECT_NAME\\nJob: $CI_JOB_NAME\\nTriggered by: $GITLAB_USER_NAME\\nBranch: $CI_COMMIT_REF_NAME\",
+      \"username\": \"GitLab CI\",
+      \"icon_emoji\": \":gitlab:\"
+      }" $SLACK_WEBHOOK_URL_DEV_1
+    - echo "$VPN_CONFIG_GITLAB_DEV1_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > dev1-be.pem
+    - chmod 400 dev1-be.pem
+    - ssh -o StrictHostKeyChecking=no -i dev1-be.pem $USER_NAME_DEMO@$HOST_NAME_DEV1 "cd ~/platform-java-services/iam-services/platform-authentication-service && git fetch origin $CI_COMMIT_REF_NAME && git checkout $CI_COMMIT_REF_NAME && git merge && sudo docker-compose --compatibility up --build -d"
+  when: manual
+
+generateLogs1-dev1:
+  stage: logs
+  needs: []
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_DEV1_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > dev1-be.pem
+    - chmod 400 dev1-be.pem
+    - ssh -o StrictHostKeyChecking=no -i dev1-be.pem $USER_NAME_DEMO@$HOST_NAME_DEV1 "cd ~ && sudo docker logs --tail 1000 authentication-service 2>&1" | ccze -A
+  when: manual
+  allow_failure: true
+
+deployment2-dev2:
+  stage: deploy
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - >
+      curl -X POST -H 'Content-type: application/json' --data "{
+      \"text\":\"Repo: $CI_PROJECT_NAME\\nJob: $CI_JOB_NAME\\nTriggered by: $GITLAB_USER_NAME\\nBranch: $CI_COMMIT_REF_NAME\",
+      \"username\": \"GitLab CI\",
+      \"icon_emoji\": \":gitlab:\"
+      }" $SLACK_WEBHOOK_URL_DEV_2
+    - echo "$VPN_CONFIG_GITLAB_DEV2_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > dev2-be.pem
+    - chmod 400 dev2-be.pem
+    - ssh -o StrictHostKeyChecking=no -i dev2-be.pem $USER_NAME_DEMO@$HOST_NAME_DEV2 "cd ~ && cd platform-java-services/iam-services/platform-authentication-service && git fetch origin $CI_COMMIT_REF_NAME && git checkout $CI_COMMIT_REF_NAME && git merge && sudo docker-compose --compatibility up --build -d"
+  when: manual
+
+generateLogs2-dev2:
+  stage: logs
+  needs: []
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_DEV2_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > dev2-be.pem
+    - chmod 400 dev2-be.pem
+    - ssh -o StrictHostKeyChecking=no -i dev2-be.pem $USER_NAME_DEMO@$HOST_NAME_DEV2 "cd ~ && sudo docker logs --tail 1000  authentication-service 2>&1" | ccze -A
+  when: manual
+  allow_failure: true
+
+deployment3-qa:
+  stage: deploy
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_QA_BE" > vpn_config.ovpn
+    - >
+      curl -X POST -H 'Content-type: application/json' --data "{
+      \"text\":\"Repo: $CI_PROJECT_NAME\\nJob: $CI_JOB_NAME\\nTriggered by: $GITLAB_USER_NAME\\nBranch: $CI_COMMIT_REF_NAME\",
+      \"username\": \"GitLab CI\",
+      \"icon_emoji\": \":gitlab:\"
+      }" $SLACK_WEBHOOK_URL_QA
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > qa-be.pem
+    - chmod 400 qa-be.pem
+    - ssh -o StrictHostKeyChecking=no -i qa-be.pem $USER_NAME_DEMO@$HOST_NAME_QA "cd ~ && cd platform-java-services/iam-services/platform-authentication-service && git fetch origin $CI_COMMIT_REF_NAME && git checkout $CI_COMMIT_REF_NAME && git merge && sudo docker-compose --compatibility up --build -d"
+  environment:
+    name: testing
+  when: manual
+
+generateLogs3-qa:
+  stage: logs
+  needs: []
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_QA_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEV_INSTANCE" > qa-be.pem
+    - chmod 400 qa-be.pem
+    - ssh -o StrictHostKeyChecking=no -i qa-be.pem $USER_NAME_DEMO@$HOST_NAME_QA "cd ~ && sudo docker logs --tail 1000  authentication-service 2>&1" | ccze -A
+  when: manual
+  allow_failure: true
+
+deployment4-demo:
+  stage: deploy
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - >
+      curl -X POST -H 'Content-type: application/json' --data "{
+      \"text\":\"Repo: $CI_PROJECT_NAME\\nJob: $CI_JOB_NAME\\nTriggered by: $GITLAB_USER_NAME\\nBranch: $CI_COMMIT_REF_NAME\",
+      \"username\": \"GitLab CI\",
+      \"icon_emoji\": \":gitlab:\"
+      }" $SLACK_WEBHOOK_URL_DEMO
+    - echo "$VPN_CONFIG_GITLAB_DEMO_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEMO_BE" > demo-be.pem
+    - chmod 400 demo-be.pem
+    - ssh -o StrictHostKeyChecking=no -i demo-be.pem $USER_NAME_DEMO@$HOST_NAME_DEMO "cd ~ && cd platform-java-services/iam-services/platform-authentication-service && git fetch origin $CI_COMMIT_REF_NAME && git checkout $CI_COMMIT_REF_NAME && git merge && sudo docker-compose --compatibility up --build -d"
+  environment:
+    name: production
+  when: manual
+
+generateLogs4-demo:
+  stage: logs
+  needs: []
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_DEMO_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_DEMO_BE" > demo-be.pem
+    - chmod 400 demo-be.pem
+    - ssh -o StrictHostKeyChecking=no -i demo-be.pem $USER_NAME_DEMO@$HOST_NAME_DEMO "cd ~ && sudo docker logs  --tail 1000  authentication-service 2>&1" | ccze -A
+  when: manual
+  allow_failure: true
+
+deployment5-projects:
+  stage: deploy
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - >
+      curl -X POST -H 'Content-type: application/json' --data "{
+      \"text\":\"Repo: $CI_PROJECT_NAME\\nJob: $CI_JOB_NAME\\nTriggered by: $GITLAB_USER_NAME\\nBranch: $CI_COMMIT_REF_NAME\",
+      \"username\": \"GitLab CI\",
+      \"icon_emoji\": \":gitlab:\"
+      }" $SLACK_WEBHOOK_URL_PROJECTS
+    - echo "$VPN_CONFIG_GITLAB_PROJECTS_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_PROJECTS_BE" > projects-be.pem
+    - chmod 400 projects-be.pem
+    - ssh -o StrictHostKeyChecking=no -i projects-be.pem $USER_NAME_DEMO@$HOST_NAME_PROJECTS_BE "cd ~ && cd platform-java-services/iam-services/platform-authentication-service && git fetch origin $CI_COMMIT_REF_NAME && git checkout $CI_COMMIT_REF_NAME && git merge && sudo docker compose --compatibility up --build -d"
+  environment:
+    name: production
+  when: manual
+
+generateLogs5-projects:
+  stage: logs
+  needs: []
+  image: alpine:latest
+  <<: *installPreRequisite_job
+  script:
+    - echo "$VPN_CONFIG_GITLAB_PROJECTS_BE" > vpn_config.ovpn
+    - openvpn --config vpn_config.ovpn --daemon
+    - sleep 10
+    - echo "$SSH_PRIVATE_KEY_PROJECTS_BE" > projects-be.pem
+    - chmod 400 projects-be.pem
+    - ssh -o StrictHostKeyChecking=no -i projects-be.pem $USER_NAME_DEMO@$HOST_NAME_PROJECTS_BE "cd ~ && sudo docker logs --tail 1000  authentication-service 2>&1" | ccze -A
+  when: manual
+  allow_failure: true

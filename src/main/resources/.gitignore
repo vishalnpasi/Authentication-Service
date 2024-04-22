@@ -1,0 +1,7 @@
+!bootstrap.yml
+!bootstrap.properties
+
+
+application-dev*
+application-local*
+

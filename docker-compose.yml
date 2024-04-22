@@ -1,0 +1,19 @@
+version: '3.6'
+services:
+  authentication-service:
+    container_name: authentication-service
+    image: authentication-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 8G
+#    ports:
+#      - 9020:9020
+    network_mode: "host"
+    volumes :
+      - ./logs:/app/logs
+#    restart: always

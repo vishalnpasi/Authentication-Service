@@ -1,0 +1,13 @@
+spring:
+  profiles:
+    active: dev
+  cloud:
+    vault:
+      uri: ${SPRING_CLOUD_VAULT_URI:http://127.0.0.1:8200}
+      token: ${SPRING_CLOUD_VAULT_TOKEN} # Should come as env variable only, not as anything else
+      scheme: http
+      kv:
+        enabled: true
+##### Copied from bootstrap.properties:
+#renew vault token once every minute
+#my.vault.token.renew.cron.expression: 0 0-59 * */24 * *
